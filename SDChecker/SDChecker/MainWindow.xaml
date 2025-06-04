@@ -31,6 +31,8 @@
                 <ComboBoxItem Content="Größenprüfung" />
                 <ComboBoxItem Content="Geschwindigkeitstest" />
                 <ComboBoxItem Content="Hardwareprüfung" />
+                <ComboBoxItem Content="Validierung" />
+                <ComboBoxItem Content="Fragmentierungsanalyse" />
                 <ComboBoxItem Content="Alle Tests" IsSelected="True" />
             </ComboBox>
             <Button x:Name="StartButton" Content="Test starten" Width="120" Margin="20,0,0,0" Click="StartButton_Click" />

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -58,20 +59,66 @@ namespace SDChecker
 
             try
             {
+                var di = new DriveInfo(drive);
+
                 if (testType == "Alle Tests" || testType == "Größenprüfung")
-                    AppendOutput($"Größe: {FormatBytes(new DriveInfo(drive).TotalSize)}\n");
+                {
+                    AppendOutput($"Größe: {FormatBytes(di.TotalSize)}\n");
+                    AppendOutput($"Freier Speicher: {FormatBytes(di.TotalFreeSpace)}\n");
+                }
 
                 if ((testType == "Alle Tests" || testType == "Hardwareprüfung") && !cancellationTokenSource.IsCancellationRequested)
                     await Task.Run(() => PrintHardwareInfo(drive), cancellationTokenSource.Token);
+
+                double write = -1, read = -1;
 
                 if ((testType == "Alle Tests" || testType == "Geschwindigkeitstest") && !cancellationTokenSource.IsCancellationRequested)
                 {
                     string testFile = Path.Combine(drive, "sdtest.tmp");
                     if (IncludeWriteTestCheckBox.IsChecked == true || IncludeReadTestCheckBox.IsChecked == true)
                     {
-                        var (write, read) = await MeasureSpeedAsync(testFile, IncludeWriteTestCheckBox.IsChecked == true, IncludeReadTestCheckBox.IsChecked == true);
+                        (write, read) = await MeasureSpeedAsync(testFile, IncludeWriteTestCheckBox.IsChecked == true, IncludeReadTestCheckBox.IsChecked == true);
                         if (write >= 0) AppendOutput($"Schreibgeschwindigkeit: {write:F2} MB/s\n");
                         if (read >= 0) AppendOutput($"Lesegeschwindigkeit: {read:F2} MB/s\n");
+                    }
+                }
+
+                if ((testType == "Alle Tests" || testType == "Validierung") && !cancellationTokenSource.IsCancellationRequested)
+                {
+                    AppendOutput("Starte Validierung mit Hashprüfung...\n");
+                    string testFile = Path.Combine(drive, "sdvalidate.tmp");
+                    byte[] data = new byte[10 * 1024 * 1024];
+                    new Random().NextBytes(data);
+                    var sha1 = SHA1.Create();
+                    var expected = sha1.ComputeHash(data);
+                    await File.WriteAllBytesAsync(testFile, data);
+                    var readData = await File.ReadAllBytesAsync(testFile);
+                    var actual = sha1.ComputeHash(readData);
+                    File.Delete(testFile);
+                    bool valid = expected.SequenceEqual(actual);
+                    AppendOutput(valid ? "Validierung erfolgreich: Daten konsistent\n" : "Warnung: Daten nicht identisch – mögliche Fälschung\n");
+                }
+
+                if ((testType == "Alle Tests" || testType == "Fragmentierungsanalyse") && !cancellationTokenSource.IsCancellationRequested)
+                {
+                    AppendOutput("Führe Fragmentierungsanalyse durch...\n");
+                    var fragOutput = await RunDefragAnalysis(drive);
+                    AppendOutput(fragOutput);
+                }
+
+                // Heuristik für Fake-Karten
+                if (!cancellationTokenSource.IsCancellationRequested)
+                {
+                    AppendOutput("Führe Heuristik zur Fake-Erkennung durch...\n");
+                    if (di.TotalSize > 64L * 1024 * 1024 * 1024 && write > 0 && write < 5.0)
+                    {
+                        AppendOutput("Verdacht: Große Kapazität aber langsame Schreibgeschwindigkeit – evtl. Fälschung\n");
+                    }
+
+                    var model = GetDriveModelFromLetter(drive);
+                    if (!string.IsNullOrEmpty(model) && !model.ToLower().Contains("sandisk") && !model.ToLower().Contains("samsung") && !model.ToLower().Contains("kingston"))
+                    {
+                        AppendOutput("Warnung: Modellname nicht als Markenhersteller erkennbar\n");
                     }
                 }
 
@@ -97,6 +144,62 @@ namespace SDChecker
                 CancelButton.IsEnabled = false;
                 StartButton.IsEnabled = true;
                 ProgressBar.Value = 100;
+            }
+        }
+
+        private string GetDriveModelFromLetter(string driveLetter)
+        {
+            string letter = driveLetter.TrimEnd('\\');
+            try
+            {
+                var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_LogicalDiskToPartition");
+                foreach (var result in searcher.Get())
+                {
+                    var antecedent = result["Antecedent"].ToString();
+                    var dependent = result["Dependent"].ToString();
+                    if (dependent.Contains($"{letter}"))
+                    {
+                        var diskIndex = antecedent.Split(new[] { "Disk #", "," }, StringSplitOptions.None)[1];
+                        var diskSearcher = new ManagementObjectSearcher($"SELECT * FROM Win32_DiskDrive WHERE Index = {diskIndex.Trim()}");
+                        foreach (var disk in diskSearcher.Get())
+                        {
+                            return disk["Model"]?.ToString() ?? string.Empty;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Warn("Fehler bei Modellermittlung", ex);
+            }
+            return string.Empty;
+        }
+
+        private async Task<string> RunDefragAnalysis(string drive)
+        {
+            try
+            {
+                var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "defrag.exe",
+                        Arguments = $"{drive.TrimEnd('\\')} /A /V",
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+
+                process.Start();
+                string output = await process.StandardOutput.ReadToEndAsync();
+                process.WaitForExit();
+                return output;
+            }
+            catch (Exception ex)
+            {
+                log.Warn("Fehler bei Fragmentierungsanalyse", ex);
+                return $"Fehler bei Fragmentierungsanalyse: {ex.Message}\n";
             }
         }
 
