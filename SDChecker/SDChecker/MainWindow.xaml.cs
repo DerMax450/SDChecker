@@ -267,6 +267,9 @@ namespace SDChecker
                             AppendOutput($"Modell: {disk["Model"]}\n");
                             AppendOutput($"Hersteller: {disk["Manufacturer"]}\n");
                             AppendOutput($"Seriennummer: {disk["SerialNumber"]}\n");
+                            AppendOutput($"DeviceID: {disk["DeviceID"]}\n");
+                            AppendOutput($"PNPDeviceID: {disk["PNPDeviceID"]}\n");
+                            AppendOutput($"Interface: {disk["InterfaceType"]}\n");
                         }
                         break;
                     }
