@@ -15,9 +15,9 @@ jobs:
 
     runs-on: windows-latest
 
-    env:
-      Solution_Name: SDChecker.sln
-      Project_Path: SDChecker/SDChecker/SDChecker.csproj
+    defaults:
+      run:
+        working-directory: SDChecker/SDChecker
 
     steps:
     - name: Checkout repository
@@ -32,10 +32,10 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     - name: Restore dependencies
-      run: dotnet restore ${{ env.Solution_Name }}
+      run: dotnet restore SDChecker.sln
 
     - name: Build project
-      run: msbuild ${{ env.Solution_Name }} /p:Configuration=${{ matrix.configuration }}
+      run: msbuild SDChecker.sln /p:Configuration=${{ matrix.configuration }}
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
