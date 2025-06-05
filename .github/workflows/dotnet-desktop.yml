@@ -8,7 +8,6 @@ on:
 
 jobs:
   build:
-
     strategy:
       matrix:
         configuration: [Debug, Release]
@@ -23,21 +22,18 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup .NET SDK
+    - name: Setup .NET SDK 8.0
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 8.0.x
 
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2
-
-    - name: Restore dependencies
+    - name: Restore NuGet packages
       run: dotnet restore SDChecker.sln
 
-    - name: Build project
-      run: msbuild SDChecker.sln /p:Configuration=${{ matrix.configuration }}
+    - name: Build with dotnet build (instead of msbuild)
+      run: dotnet build SDChecker.sln --configuration ${{ matrix.configuration }} --no-restore
 
-    - name: Upload build artifacts
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: SDChecker-${{ matrix.configuration }}
