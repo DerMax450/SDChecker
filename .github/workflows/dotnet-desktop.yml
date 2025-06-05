@@ -17,7 +17,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: SDChecker/SDChecker
+        working-directory: SDChecker
 
     steps:
     - name: Checkout repository
