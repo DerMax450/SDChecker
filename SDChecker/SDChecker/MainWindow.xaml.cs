@@ -299,5 +299,37 @@ namespace SDChecker
             }
             return $"{len:0.##} {sizes[order]}";
         }
+
+        private async void InspectFlashButton_Click(object sender, RoutedEventArgs e)
+        {
+            await RunFlashInspectorAsync();
+        }
+
+        private async Task RunFlashInspectorAsync()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "FlashChipInspector.exe", // Pfad ggf. absolut angeben
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = new Process { StartInfo = psi };
+                process.Start();
+
+                string output = await process.StandardOutput.ReadToEndAsync();
+                process.WaitForExit();
+
+                AppendOutput("FlashChipInspector output:\n" + output);
+            }
+            catch (Exception ex)
+            {
+                AppendOutput("Error running FlashChipInspector: " + ex.Message);
+            }
+        }
+
     }
 }

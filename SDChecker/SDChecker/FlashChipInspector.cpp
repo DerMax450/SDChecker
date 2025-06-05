@@ -6,6 +6,8 @@
 #include <regstr.h>
 #include <vector>
 #include <winioctl.h>
+#include <string>
+#include <tchar.h>
 
 #pragma comment(lib, "setupapi.lib")
 
@@ -14,93 +16,77 @@ void PrintDriveGeometry(HANDLE hDevice) {
     DWORD junk = 0;
     if (DeviceIoControl(hDevice, IOCTL_DISK_GET_DRIVE_GEOMETRY,
         NULL, 0, &pdg, sizeof(pdg), &junk, (LPOVERLAPPED)NULL)) {
-        std::cout << "Zylinder: " << pdg.Cylinders.QuadPart << std::endl;
-        std::cout << "Spuren/Kopf: " << pdg.TracksPerCylinder << std::endl;
-        std::cout << "Sektoren/Spur: " << pdg.SectorsPerTrack << std::endl;
-        std::cout << "Bytes/Sektor: " << pdg.BytesPerSector << std::endl;
-    }
-    else {
-        std::cerr << "Fehler beim Abrufen der Geometrie" << std::endl;
+        std::cout << "Cylinders: " << pdg.Cylinders.QuadPart << std::endl;
+        std::cout << "Tracks per Cylinder: " << pdg.TracksPerCylinder << std::endl;
+        std::cout << "Sectors per Track: " << pdg.SectorsPerTrack << std::endl;
+        std::cout << "Bytes per Sector: " << pdg.BytesPerSector << std::endl;
+        std::cout << "Disk Size (GB): " << (pdg.Cylinders.QuadPart * pdg.TracksPerCylinder * pdg.SectorsPerTrack * pdg.BytesPerSector) / (1024.0 * 1024.0 * 1024.0) << std::endl;
+    } else {
+        std::cerr << "Failed to get geometry" << std::endl;
     }
 }
 
-void ListVolumesForDrive(const std::wstring& deviceName) {
+void ListVolumes() {
     DWORD drives = GetLogicalDrives();
-    for (char letter = 'A'; letter <= 'Z'; letter++) {
+    for (char letter = 'A'; letter <= 'Z'; ++letter) {
         if ((drives >> (letter - 'A')) & 1) {
-            std::wstring rootPath = std::wstring(1, letter) + L":\\";
-            wchar_t volumeName[MAX_PATH] = { 0 };
-            if (GetVolumeNameForVolumeMountPointW(rootPath.c_str(), volumeName, MAX_PATH)) {
-                std::wcout << L"Laufwerk " << letter << L": - Volume: " << volumeName;
-                wchar_t fs[MAX_PATH] = { 0 };
-                DWORD serial = 0, maxLen = 0, flags = 0;
-                if (GetVolumeInformationW(rootPath.c_str(), NULL, 0, &serial, &maxLen, &flags, fs, MAX_PATH)) {
-                    std::wcout << L" (FS: " << fs << L")";
-                }
-                std::wcout << std::endl;
+            std::wstring root = std::wstring(1, letter) + L":\\";
+            wchar_t volName[MAX_PATH] = { 0 }, fs[MAX_PATH] = { 0 };
+            DWORD serial = 0, maxLen = 0, flags = 0;
+            if (GetVolumeInformationW(root.c_str(), NULL, 0, &serial, &maxLen, &flags, fs, MAX_PATH)) {
+                std::wcout << L"Drive " << letter << L": File System: " << fs << L" Serial: " << std::hex << serial << std::endl;
             }
         }
     }
 }
 
-int main() {
-    HDEVINFO hDevInfo;
-    SP_DEVINFO_DATA DeviceInfoData;
-    DWORD i;
+void PrintDeviceDetails(HDEVINFO hDevInfo, SP_DEVINFO_DATA& devInfo, DWORD index) {
+    TCHAR buffer[1024];
+    DWORD size = 0;
 
-    hDevInfo = SetupDiGetClassDevs(&GUID_DEVCLASS_DISKDRIVE, 0, 0, DIGCF_PRESENT);
+    if (SetupDiGetDeviceRegistryProperty(hDevInfo, &devInfo, SPDRP_DEVICEDESC, NULL, (PBYTE)buffer, sizeof(buffer), &size)) {
+        std::wcout << L"Device Name: " << buffer << std::endl;
+    }
+    if (SetupDiGetDeviceRegistryProperty(hDevInfo, &devInfo, SPDRP_HARDWAREID, NULL, (PBYTE)buffer, sizeof(buffer), &size)) {
+        std::wcout << L"Hardware ID: " << buffer << std::endl;
+    }
+    if (SetupDiGetDeviceRegistryProperty(hDevInfo, &devInfo, SPDRP_MFG, NULL, (PBYTE)buffer, sizeof(buffer), &size)) {
+        std::wcout << L"Manufacturer: " << buffer << std::endl;
+    }
+
+    TCHAR devPath[64];
+    swprintf_s(devPath, L"\\\\.\\PhysicalDrive%u", index);
+    HANDLE hDevice = CreateFileW(devPath, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (hDevice != INVALID_HANDLE_VALUE) {
+        std::wcout << L"Geometry for " << devPath << L":" << std::endl;
+        PrintDriveGeometry(hDevice);
+        CloseHandle(hDevice);
+    } else {
+        std::wcerr << L"Cannot open " << devPath << std::endl;
+    }
+}
+
+int main() {
+    HDEVINFO hDevInfo = SetupDiGetClassDevs(&GUID_DEVCLASS_DISKDRIVE, NULL, NULL, DIGCF_PRESENT);
     if (hDevInfo == INVALID_HANDLE_VALUE) {
-        std::cerr << "Fehler bei SetupDiGetClassDevs" << std::endl;
+        std::cerr << "SetupDiGetClassDevs failed" << std::endl;
         return 1;
     }
 
-    DeviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+    SP_DEVINFO_DATA devInfo;
+    devInfo.cbSize = sizeof(SP_DEVINFO_DATA);
 
-    for (i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &DeviceInfoData); i++) {
-        TCHAR buffer[1024];
-        DWORD buffersize = 0;
-
-        if (SetupDiGetDeviceRegistryProperty(hDevInfo, &DeviceInfoData,
-            SPDRP_DEVICEDESC, 0, (PBYTE)buffer, sizeof(buffer), &buffersize)) {
-            std::wcout << L"Gerätename: " << buffer << std::endl;
-        }
-
-        if (SetupDiGetDeviceRegistryProperty(hDevInfo, &DeviceInfoData,
-            SPDRP_HARDWAREID, 0, (PBYTE)buffer, sizeof(buffer), &buffersize)) {
-            std::wcout << L"HardwareID: " << buffer << std::endl;
-        }
-
-        if (SetupDiGetDeviceRegistryProperty(hDevInfo, &DeviceInfoData,
-            SPDRP_MFG, 0, (PBYTE)buffer, sizeof(buffer), &buffersize)) {
-            std::wcout << L"Hersteller: " << buffer << std::endl;
-        }
-
-        // Versuche auf PHYSICALDRIVE zuzugreifen
-        WCHAR devPath[64];
-        swprintf_s(devPath, L"\\\\.\\PhysicalDrive%u", i);
-        HANDLE hDevice = CreateFile(devPath, 0,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
-            OPEN_EXISTING, 0, NULL);
-
-        if (hDevice != INVALID_HANDLE_VALUE) {
-            std::wcout << L"Geometrie für " << devPath << L":" << std::endl;
-            PrintDriveGeometry(hDevice);
-            CloseHandle(hDevice);
-        }
-        else {
-            std::wcerr << L"Kann " << devPath << L" nicht öffnen." << std::endl;
-        }
-
-        std::wcout << L"--- Zugeordnete Volumes ---" << std::endl;
-        ListVolumesForDrive(devPath);
-
-        std::wcout << L"-----------------------------" << std::endl;
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &devInfo); ++i) {
+        std::wcout << L"--- Device " << i << L" ---" << std::endl;
+        PrintDeviceDetails(hDevInfo, devInfo, i);
+        std::wcout << L"------------------------" << std::endl;
     }
 
-    if (GetLastError() != NO_ERROR && GetLastError() != ERROR_NO_MORE_ITEMS) {
-        std::cerr << "Fehler beim Auflisten der Geräte" << std::endl;
+    if (GetLastError() != ERROR_NO_MORE_ITEMS) {
+        std::cerr << "Device enumeration failed" << std::endl;
     }
 
+    ListVolumes();
     SetupDiDestroyDeviceInfoList(hDevInfo);
     return 0;
 }
